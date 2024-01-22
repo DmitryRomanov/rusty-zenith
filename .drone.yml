@@ -19,9 +19,8 @@ steps:
     commands:
       - echo "$CI_REGISTRY_PASSWORD" | docker login registry.gitlab.com -u "$CI_REGISTRY_USER" --password-stdin
       - while ! docker image ls; do sleep 1; done
-      - echo $TARGETARCH
       - docker buildx create --use --platform=linux/arm64,linux/amd64 --name multi-platform-builder
-      - docker buildx build --push --platform linux/arm64/v8,linux/amd64 --tag registry.gitlab.com/bignoise/images/icecast:build${DRONE_BUILD_NUMBER} . --build-arg TARGETARCH=$TARGETARCH -f Dockerfile
+      - docker buildx build --push --platform linux/arm64/v8,linux/amd64 --tag registry.gitlab.com/bignoise/images/icecast:build${DRONE_BUILD_NUMBER} . --build-arg TARGETARCH=x86_64 -f Dockerfile
     environment:
       CI_REGISTRY_USER:
         from_secret: username
