@@ -14,9 +14,9 @@ COPY ./Cargo.toml ./Cargo.toml
 
 RUN case "$TARGETARCH" in \
   "amd64") echo x86_64-unknown-linux-gnu > /rust_target.txt ;; \
-  "arm64") echo armv7-unknown-linux-musleabihf > /rust_target.txt ;; \
+  "arm64") echo aarch64-unknown-linux-gnu > /rust_target.txt ;; \
   *) echo ${TARGETARCH}-unknown-linux-gnu > /rust_target.txt ;; \
-+esac
+esac
 
 # Build only the dependencies to cache them
 RUN rustup target add $(cat /rust_target.txt)
