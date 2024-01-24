@@ -9,5 +9,7 @@ steps:
   - apk add --no-cache ca-certificates
   - apk add --no-cache musl-dev
   - apk add --no-cache libressl-dev
+  - rustup target add x86_64-unknown-linux-musl
   - cargo build --release --target x86_64-unknown-linux-musl
+  - rustup target add aarch64-unknown-linux-musl
   - cargo build --release --target aarch64-unknown-linux-musl
