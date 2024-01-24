@@ -1,29 +1,46 @@
-FROM rust:1.75 as build
+# Define the base image
+FROM rust:1.75.0-alpine3.18 as build
 
-# 1. Create a new empty shell project
+RUN apk add --no-cache ca-certificates \
+  musl-dev \
+  libressl-dev && \
+  rm -rf /var/cache/apk/*
+
+# Define the build argument for the target architecture
+ARG TARGETARCH
+
+# Create a new empty shell project
 RUN USER=root cargo new --bin rusty-zenith
 WORKDIR /rusty-zenith
 
-# 2. Copy our manifests
+# Copy our manifests
 COPY ./Cargo.lock ./Cargo.lock
 COPY ./Cargo.toml ./Cargo.toml
-
-# 3. Build only the dependencies to cache them
-RUN cargo build --release
-RUN rm src/*.rs
-
-# 4. Now that the dependency is built, copy your source code
 COPY ./src ./src
 
-# 5. Build for release.
-RUN rm ./target/release/rusty-zenith*
-RUN cargo build --release
+RUN case "$TARGETARCH" in \
+  "amd64") echo x86_64-unknown-linux-musl > /rust_target.txt ;; \
+  "arm64") echo aarch64-unknown-linux-musl > /rust_target.txt ;; \
+  *) echo ${TARGETARCH}-unknown-linux-musl > /rust_target.txt ;; \
+esac
 
-# our final base
-FROM debian:buster-slim
+# Build only the dependencies to cache them
+RUN rustup target add $(cat /rust_target.txt)
+# RUN cargo build --release --target $(cat /rust_target.txt)
 
-# copy the build artifact from the build stage
-COPY --from=build /rusty-zenith/target/release/rusty-zenith .
+# Now that the dependency is built, copy your source code
 
-# set the startup command to run your binary
+# Build for release
+# RUN rm ./target/$(cat /rust_target.txt)/release/rusty-zenith*
+RUN cargo build --release --target $(cat /rust_target.txt)
+RUN cp /rusty-zenith/target/$(cat /rust_target.txt)/release/rusty-zenith /rusty-zenith/rusty-zenith
+# RUN rm src/*.rs
+
+# Define the final base image
+FROM alpine:3.18
+
+# Copy the build artifact from the build stage
+COPY --from=build /rusty-zenith/rusty-zenith .
+
+# Set the startup command to run your binary
 CMD ["./rusty-zenith"]
