@@ -13,7 +13,7 @@ pub struct Server {
     pub source_count: usize,
     pub relay_count: usize,
     pub properties: Properties,
-    pub stats: Stats,
+    pub stats: Stats
 }
 
 impl Server {

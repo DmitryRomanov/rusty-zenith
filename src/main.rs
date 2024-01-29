@@ -26,6 +26,7 @@ mod stream_decoder;
 mod source;
 mod client;
 mod server;
+mod logger;
 
 async fn handle_connection( server: Arc< RwLock< server::Server > >, mut stream: TcpStream ) -> Result< (), Box< dyn Error > > {
     let ( server_id, header_timeout, http_max_len ) = {
@@ -35,6 +36,10 @@ async fn handle_connection( server: Arc< RwLock< server::Server > >, mut stream:
 
     let mut message = Vec::new();
     let mut buf = [ 0; 1024 ];
+
+    let logging_properties = logger::default_property_logging();
+    let logger = logger::Logger::new(logging_properties);
+    logger.access("ok");
 
     // Add a timeout
     timeout( Duration::from_millis( header_timeout ), async {
@@ -1578,8 +1583,6 @@ async fn broadcast_to_clients( source: &Arc< RwLock< source::Source > >, data: V
         }
     }
 }
-
-// Serde default deserialization values
 
 #[ tokio::main ]
 async fn main() {
