@@ -33,7 +33,7 @@ async fn handle_connection( server: Arc< RwLock< server::Server > >, mut stream:
         let properties = &server.read().await.properties;
         ( properties.server_id.clone(), properties.limits.header_timeout, properties.limits.http_max_length )
     };
-
+    
     let mut message = Vec::new();
     let mut buf = [ 0; 1024 ];
 
@@ -378,7 +378,8 @@ async fn handle_connection( server: Arc< RwLock< server::Server > >, mut stream:
                     properties: properties.clone(),
                     stats: RwLock::new( stats )
                 };
-
+                
+                logger.access("ok");
 
                 if let Some( agent ) = &client.properties.uagent {
                     println!( "User {} started listening on {} with user-agent {}", client_id, client.source.read().await, agent );
