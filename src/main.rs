@@ -98,8 +98,8 @@ struct SourceLimits {
 struct Source {
     // Is setting the mountpoint in the source really useful, since it's not like the source has any use for it
     mountpoint: String,
-    properties: icy::IcyProperties,
-    metadata: Option< icy::IcyMetadata >,
+    properties: icy::Properties,
+    metadata: Option< icy::Metadata >,
     metadata_vec: Vec< u8 >,
     clients: HashMap< Uuid, Arc< RwLock< Client > > >,
     burst_buffer: Vec< u8 >,
@@ -110,7 +110,7 @@ struct Source {
 }
 
 impl Source {
-    fn new( mountpoint: String, properties: icy::IcyProperties ) -> Source {
+    fn new( mountpoint: String, properties: icy::Properties ) -> Source {
         Source {
             mountpoint,
             properties,
@@ -474,7 +474,7 @@ async fn handle_connection( server: Arc< RwLock< Server > >, mut stream: TcpStre
             // Sources must have a content type
             // Maybe the type that is served should be checked?
             let mut properties = match get_header( "Content-Type", headers ) {
-                Some( content_type ) => icy::IcyProperties::new( std::str::from_utf8( content_type )?.to_string() ),
+                Some( content_type ) => icy::Properties::new( std::str::from_utf8( content_type )?.to_string() ),
                 None => {
                     return response::send_forbidden( &mut stream, &server_id, Some( ( "text/plain; charset=utf-8", "No Content-type provided" ) ) ).await;
                 }
@@ -892,7 +892,7 @@ async fn handle_connection( server: Arc< RwLock< Server > >, mut stream: TcpStre
                                             let mut source = source.write().await;
                                             source.metadata = match ( song, url ) {
                                                 ( None, None ) => None,
-                                                _ => Some( icy::IcyMetadata {
+                                                _ => Some( icy::Metadata {
                                                     title: song.clone(),
                                                     url: url.clone()
                                                 } ),
@@ -1482,7 +1482,7 @@ async fn relay_mountpoint( server: Arc< RwLock< Server > >, master_server: Maste
 
     // Sources must have a content type
     let mut properties = match get_header( "Content-Type", res.headers ) {
-        Some( content_type ) => icy::IcyProperties::new( std::str::from_utf8( content_type )?.to_string() ),
+        Some( content_type ) => icy::Properties::new( std::str::from_utf8( content_type )?.to_string() ),
         None => return Err( Box::new( std::io::Error::new( ErrorKind::Other, "No Content-Type provided" ) ) )
     };
 
@@ -1607,7 +1607,7 @@ async fn relay_mountpoint( server: Arc< RwLock< Server > >, master_server: Maste
                                             if let Ok( meta_str ) = std::str::from_utf8( &metadata_vec[ 1 .. cut ] ) {
                                                 let reg = Regex::new( r"^StreamTitle='(.+?)';StreamUrl='(.+?)';$" ).unwrap();
                                                 if let Some( captures ) = reg.captures( meta_str ) {
-                                                    let metadata = icy::IcyMetadata {
+                                                    let metadata = icy::Metadata {
                                                         title: {
                                                             let m_str = captures.get( 1 ).unwrap().as_str();
                                                             if m_str.is_empty() {
@@ -1739,7 +1739,7 @@ async fn relay_mountpoint( server: Arc< RwLock< Server > >, master_server: Maste
                                                 if let Ok( meta_str ) = std::str::from_utf8( &metadata_vec[ 1 .. cut ] ) {
                                                     let reg = Regex::new( r"^StreamTitle='(.*?)';StreamUrl='(.*?)';$" ).unwrap();
                                                     if let Some( captures ) = reg.captures( meta_str ) {
-                                                        let metadata = icy::IcyMetadata {
+                                                        let metadata = icy::Metadata {
                                                             title: {
                                                                 let m_str = captures.get( 1 ).unwrap().as_str();
                                                                 if m_str.is_empty() {
@@ -1974,7 +1974,7 @@ async fn write_to_client( stream: &mut TcpStream, sent_count: &mut usize, metale
 /**
  * Get a vector containing n and the padded data
  */
-fn get_metadata_vec( metadata: &Option< icy::IcyMetadata > ) -> Vec< u8 > {
+fn get_metadata_vec( metadata: &Option< icy::Metadata > ) -> Vec< u8 > {
     let mut subvec = vec![ 0 ];
     if let Some( icy_metadata ) = metadata {
         subvec.extend_from_slice( b"StreamTitle='" );
@@ -2005,7 +2005,7 @@ fn get_metadata_vec( metadata: &Option< icy::IcyMetadata > ) -> Vec< u8 > {
     subvec
 }
 
-fn populate_properties( properties: &mut icy::IcyProperties, headers: &[ httparse::Header< '_ > ] ) {
+fn populate_properties( properties: &mut icy::Properties, headers: &[ httparse::Header< '_ > ] ) {
     for header in headers {
         let name = header.name.to_lowercase();
         let name = name.as_str();

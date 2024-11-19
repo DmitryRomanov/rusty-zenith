@@ -1,7 +1,7 @@
 use serde::Serialize;
 
 #[derive(Serialize, Clone)]
-pub struct IcyProperties {
+pub struct Properties {
     pub uagent: Option<String>,
     pub public: bool,
     pub name: Option<String>,
@@ -13,14 +13,14 @@ pub struct IcyProperties {
 }
 
 #[derive(Serialize, Clone)]
-pub struct IcyMetadata {
+pub struct Metadata {
     pub title: Option<String>,
     pub url: Option<String>,
 }
 
-impl IcyProperties {
-    pub fn new(content_type: String) -> IcyProperties {
-        IcyProperties {
+impl Properties {
+    pub fn new(content_type: String) -> Properties {
+        Properties {
             uagent: None,
             public: false,
             name: None,

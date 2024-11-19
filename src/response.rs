@@ -89,7 +89,7 @@ pub async fn server_info( stream: &mut TcpStream )  -> Result< (), Box< dyn Erro
     Ok( () )
 }
 
-pub async fn send_listener_ok( stream: &mut TcpStream, id: &str, properties: &icy::IcyProperties, meta_enabled: bool, metaint: usize ) -> Result< (), Box< dyn Error > > {
+pub async fn send_listener_ok( stream: &mut TcpStream, id: &str, properties: &icy::Properties, meta_enabled: bool, metaint: usize ) -> Result< (), Box< dyn Error > > {
     stream.write_all( b"HTTP/1.0 200 OK\r\n" ).await?;
     stream.write_all( ( format!( "Server: {}\r\n", id ) ).as_bytes() ).await?;
     stream.write_all( b"Connection: Close\r\n" ).await?;
