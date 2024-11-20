@@ -114,7 +114,7 @@ async fn handle_connection( server: Arc< RwLock< server::Server > >, mut stream:
 
             // Sources must have a content type
             // Maybe the type that is served should be checked?
-            let mut properties = match get_header( "Content-Type", headers ) {
+            let mut properties = match request::get_header( "Content-Type", headers ) {
                 Some( content_type ) => icy::Properties::new( std::str::from_utf8( content_type )?.to_string() ),
                 None => {
                     return response::send_forbidden( &mut stream, &server_id, Some( ( "text/plain; charset=utf-8", "No Content-type provided" ) ) ).await;
@@ -143,7 +143,7 @@ async fn handle_connection( server: Arc< RwLock< server::Server > >, mut stream:
                 // Verify that the transfer encoding is identity or not included
                 // No support for chunked or encoding ATM
                 // TODO Add support for transfer encoding options as specified here: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Transfer-Encoding
-                match ( get_header( "Transfer-Encoding", headers ), get_header( "Content-Length", headers ) ) {
+                match ( request::get_header( "Transfer-Encoding", headers ), request::get_header( "Content-Length", headers ) ) {
                     ( Some( b"identity"), Some( value ) ) | ( None, Some( value ) ) => {
                         // Use content length decoder
                         match std::str::from_utf8( value ) {
@@ -169,7 +169,7 @@ async fn handle_connection( server: Arc< RwLock< server::Server > >, mut stream:
 
                 // Check if client sent Expect: 100-continue in header, if that's the case we will need to return 100 in status code
                 // Without it, it means that client has no body to send, we will stop if that's the case
-                match get_header( "Expect", headers ) {
+                match request::get_header( "Expect", headers ) {
                     Some( b"100-continue" ) => response::send_continue( &mut stream, &server_id ).await?,
                     Some( _ ) => return response::send_bad_request( &mut stream, &server_id, Some( ( "text/plain; charset=utf-8", "Expected 100-continue in Expect header" ) ) ).await,
                     None => return response::send_bad_request( &mut stream, &server_id, Some( ( "text/plain; charset=utf-8", "PUT request must come with Expect header" ) ) ).await
@@ -323,7 +323,7 @@ async fn handle_connection( server: Arc< RwLock< server::Server > >, mut stream:
                 }
 
                 // Check if metadata is enabled
-                let meta_enabled = get_header( "Icy-MetaData", headers ).unwrap_or( b"0" ) == b"1";
+                let meta_enabled = request::get_header( "Icy-MetaData", headers ).unwrap_or( b"0" ) == b"1";
 
                 // Reply with a 200 OK
                 response::send_listener_ok( &mut stream, &server_id, &source.properties, meta_enabled, serv.properties.metaint ).await?;
@@ -343,7 +343,7 @@ async fn handle_connection( server: Arc< RwLock< server::Server > >, mut stream:
                 let properties = client::Properties {
                     id: client_id,
                     uagent: {
-                        if let Some( arr ) = get_header( "User-Agent", headers ) {
+                        if let Some( arr ) = request::get_header( "User-Agent", headers ) {
                             if let Ok( parsed ) = std::str::from_utf8( arr ) {
                                 Some( parsed.to_string() )
                             } else {
@@ -977,7 +977,7 @@ async fn connect_and_redirect( url: String, headers: Vec< String >, max_len: usi
                         if remaining_redirects == 0 {
                             // Reached maximum number of redirects!
                             return Err( Box::new( std::io::Error::new( ErrorKind::Other, "Maximum redirects reached" ) ) );
-                        } else if let Some( location ) = get_header( "Location", res.headers ) {
+                        } else if let Some( location ) = request::get_header( "Location", res.headers ) {
                             // Try parsing it into a URL first
                             let loc_str = std::str::from_utf8( location )?;
                             if let Ok( mut redirect ) = Url::parse( loc_str ) {
@@ -1027,7 +1027,7 @@ async fn master_server_mountpoints( server: &Arc< RwLock< server::Server > >, ma
         Status::Partial => return Err( Box::new( std::io::Error::new( ErrorKind::Other, "Received an incomplete response" ) ) )
     };
 
-    let mut len = match get_header( "Content-Length", res.headers ) {
+    let mut len = match request::get_header( "Content-Length", res.headers ) {
         Some( val ) => {
             let parsed = std::str::from_utf8( val )?;
             parsed.parse::< usize >()?
@@ -1099,11 +1099,11 @@ async fn relay_mountpoint( server: Arc< RwLock< server::Server > >, master_serve
     }
 
     // checking if our peer is really an icecast server
-    if get_header( "icy-name", res.headers ).is_none() {
+    if request::get_header( "icy-name", res.headers ).is_none() {
         return Err( Box::new( std::io::Error::new( ErrorKind::Other, "Is this a valid icecast stream?" ) ) );
     }
 
-    let mut decoder = match ( get_header( "Transfer-Encoding", res.headers ), get_header( "Content-Length", res.headers ) ) {
+    let mut decoder = match ( request::get_header( "Transfer-Encoding", res.headers ), request::get_header( "Content-Length", res.headers ) ) {
         ( Some( b"identity"), Some( value ) ) | ( None, Some( value ) ) => {
             // Use content length decoder
             match std::str::from_utf8( value ) {
@@ -1122,7 +1122,7 @@ async fn relay_mountpoint( server: Arc< RwLock< server::Server > >, master_serve
     };
 
     // Sources must have a content type
-    let mut properties = match get_header( "Content-Type", res.headers ) {
+    let mut properties = match request::get_header( "Content-Type", res.headers ) {
         Some( content_type ) => icy::Properties::new( std::str::from_utf8( content_type )?.to_string() ),
         None => return Err( Box::new( std::io::Error::new( ErrorKind::Other, "No Content-Type provided" ) ) )
     };
@@ -1170,7 +1170,7 @@ async fn relay_mountpoint( server: Arc< RwLock< server::Server > >, master_serve
             remaining: usize
         }
 
-        let metaint = match get_header( "Icy-Metaint", res.headers ) {
+        let metaint = match request::get_header( "Icy-Metaint", res.headers ) {
             Some( val ) => std::str::from_utf8( val )?.parse::< usize >()?,
             None => 0
         };
@@ -1614,18 +1614,8 @@ fn get_metadata_vec( metadata: &Option< icy::Metadata > ) -> Vec< u8 > {
     subvec
 }
 
-fn get_header< 'a >( key: &str, headers: &[ httparse::Header< 'a > ] ) -> Option< &'a [ u8 ] > {
-    let key = key.to_lowercase();
-    for header in headers {
-        if header.name.to_lowercase() == key {
-            return Some( header.value )
-        }
-    }
-    None
-}
-
 fn get_basic_auth( headers: &[ httparse::Header ] ) -> Option< ( String, String ) > {
-    if let Some( auth ) = get_header( "Authorization", headers ) {
+    if let Some( auth ) = request::get_header( "Authorization", headers ) {
         let reg = Regex::new( r"^Basic ((?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?)$" ).unwrap();
         if let Some( capture ) = reg.captures( std::str::from_utf8( &auth ).unwrap() ) {
             if let Some( ( name, pass ) ) = std::str::from_utf8( &base64::decode( &capture[ 1 ] ).unwrap() ).unwrap().split_once( ":" ) {
@@ -1635,7 +1625,6 @@ fn get_basic_auth( headers: &[ httparse::Header ] ) -> Option< ( String, String 
     }
     None
 }
-
 
 // TODO Add some sort of permission system
 fn validate_user( properties: &server::Properties, username: String, password: String ) -> bool {

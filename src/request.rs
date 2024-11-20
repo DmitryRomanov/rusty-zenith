@@ -1,4 +1,3 @@
-
 #[derive(Clone)]
 pub struct Query {
     field: String,
@@ -41,4 +40,14 @@ pub fn get_queries_for(keys: Vec<&str>, queries: &[Query]) -> Vec<Option<String>
     }
 
     results
+}
+
+pub fn get_header<'a>(key: &str, headers: &[httparse::Header<'a>]) -> Option<&'a [u8]> {
+    let key = key.to_lowercase();
+    for header in headers {
+        if header.name.to_lowercase() == key {
+            return Some(header.value);
+        }
+    }
+    None
 }
