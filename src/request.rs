@@ -1,3 +1,5 @@
+use regex::Regex;
+
 #[derive(Clone)]
 pub struct Query {
     field: String,
@@ -47,6 +49,23 @@ pub fn get_header<'a>(key: &str, headers: &[httparse::Header<'a>]) -> Option<&'a
     for header in headers {
         if header.name.to_lowercase() == key {
             return Some(header.value);
+        }
+    }
+    None
+}
+
+pub fn get_basic_auth(headers: &[httparse::Header]) -> Option<(String, String)> {
+    if let Some(auth) = get_header("Authorization", headers) {
+        let reg =
+            Regex::new(r"^Basic ((?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?)$")
+                .unwrap();
+        if let Some(capture) = reg.captures(std::str::from_utf8(&auth).unwrap()) {
+            if let Some((name, pass)) = std::str::from_utf8(&base64::decode(&capture[1]).unwrap())
+                .unwrap()
+                .split_once(":")
+            {
+                return Some((String::from(name), String::from(pass)));
+            }
         }
     }
     None

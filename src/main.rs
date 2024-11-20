@@ -65,7 +65,7 @@ async fn handle_connection( server: Arc< RwLock< server::Server > >, mut stream:
         // Some info about the protocol is provided here: https://gist.github.com/ePirat/adc3b8ba00d85b7e3870
         "SOURCE" | "PUT" => {
             // Check for authorization
-            if let Some( ( name, pass ) ) = get_basic_auth( headers ) {
+            if let Some( ( name, pass ) ) = request::get_basic_auth( headers ) {
                 if !validate_user( &server.read().await.properties, name, pass ) {
                     // Invalid user/pass provided
                     return response::send_unauthorized( &mut stream, &server_id, Some( ( "text/plain; charset=urf-8", "Invalid credentials" ) ) ).await;
@@ -510,7 +510,7 @@ async fn handle_connection( server: Arc< RwLock< server::Server > >, mut stream:
                     "/admin/metadata" => {
                         let serv = server.read().await;
                         // Check for authorization
-                        if let Some( ( name, pass ) ) = get_basic_auth( headers ) {
+                        if let Some( ( name, pass ) ) = request::get_basic_auth( headers ) {
                             // For testing purposes right now
                             // TODO Add proper configuration
                             if !validate_user( &serv.properties, name, pass ) {
@@ -554,7 +554,7 @@ async fn handle_connection( server: Arc< RwLock< server::Server > >, mut stream:
                     "/admin/listclients" => {
                         let serv = server.read().await;
                         // Check for authorization
-                        if let Some( ( name, pass ) ) = get_basic_auth( headers ) {
+                        if let Some( ( name, pass ) ) = request::get_basic_auth( headers ) {
                             // For testing purposes right now
                             // TODO Add proper configuration
                             if !validate_user( &serv.properties, name, pass ) {
@@ -603,7 +603,7 @@ async fn handle_connection( server: Arc< RwLock< server::Server > >, mut stream:
                     "/admin/fallbacks" => {
                         let serv = server.read().await;
                         // Check for authorization
-                        if let Some( ( name, pass ) ) = get_basic_auth( headers ) {
+                        if let Some( ( name, pass ) ) = request::get_basic_auth( headers ) {
                             // For testing purposes right now
                             // TODO Add proper configuration
                             if !validate_user( &serv.properties, name, pass ) {
@@ -640,7 +640,7 @@ async fn handle_connection( server: Arc< RwLock< server::Server > >, mut stream:
                     "/admin/moveclients" => {
                         let serv = server.read().await;
                         // Check for authorization
-                        if let Some( ( name, pass ) ) = get_basic_auth( headers ) {
+                        if let Some( ( name, pass ) ) = request::get_basic_auth( headers ) {
                             // For testing purposes right now
                             // TODO Add proper configuration
                             if !validate_user( &serv.properties, name, pass ) {
@@ -680,7 +680,7 @@ async fn handle_connection( server: Arc< RwLock< server::Server > >, mut stream:
                     "/admin/killclient" => {
                         let serv = server.read().await;
                         // Check for authorization
-                        if let Some( ( name, pass ) ) = get_basic_auth( headers ) {
+                        if let Some( ( name, pass ) ) = request::get_basic_auth( headers ) {
                             // For testing purposes right now
                             // TODO Add proper configuration
                             if !validate_user( &serv.properties, name, pass ) {
@@ -718,7 +718,7 @@ async fn handle_connection( server: Arc< RwLock< server::Server > >, mut stream:
                     "/admin/killsource" => {
                         let serv = server.read().await;
                         // Check for authorization
-                        if let Some( ( name, pass ) ) = get_basic_auth( headers ) {
+                        if let Some( ( name, pass ) ) = request::get_basic_auth( headers ) {
                             // For testing purposes right now
                             // TODO Add proper configuration
                             if !validate_user( &serv.properties, name, pass ) {
@@ -751,7 +751,7 @@ async fn handle_connection( server: Arc< RwLock< server::Server > >, mut stream:
                     "/admin/listmounts" => {
                         let serv = server.read().await;
                         // Check for authorization
-                        if let Some( ( name, pass ) ) = get_basic_auth( headers ) {
+                        if let Some( ( name, pass ) ) = request::get_basic_auth( headers ) {
                             // For testing purposes right now
                             // TODO Add proper configuration
                             if !validate_user( &serv.properties, name, pass ) {
@@ -1612,18 +1612,6 @@ fn get_metadata_vec( metadata: &Option< icy::Metadata > ) -> Vec< u8 > {
     }
 
     subvec
-}
-
-fn get_basic_auth( headers: &[ httparse::Header ] ) -> Option< ( String, String ) > {
-    if let Some( auth ) = request::get_header( "Authorization", headers ) {
-        let reg = Regex::new( r"^Basic ((?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?)$" ).unwrap();
-        if let Some( capture ) = reg.captures( std::str::from_utf8( &auth ).unwrap() ) {
-            if let Some( ( name, pass ) ) = std::str::from_utf8( &base64::decode( &capture[ 1 ] ).unwrap() ).unwrap().split_once( ":" ) {
-                return Some( ( String::from( name ), String::from( pass ) ) )
-            }
-        }
-    }
-    None
 }
 
 // TODO Add some sort of permission system
