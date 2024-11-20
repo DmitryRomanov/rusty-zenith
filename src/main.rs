@@ -22,6 +22,7 @@ use uuid::Uuid;
 mod request;
 mod response;
 mod icy;
+mod stream_decoder;
 
 // Default constants
 const ADDRESS: &str = "0.0.0.0";
@@ -277,115 +278,6 @@ impl Server {
     }
 }
 
-#[ derive( PartialEq ) ]
-enum TransferEncoding {
-    Identity,
-    Chunked,
-    Length( usize )
-}
-
-struct StreamDecoder {
-    encoding: TransferEncoding,
-    remainder: usize,
-    chunk: Vec< u8 >
-}
-
-impl StreamDecoder {
-    fn new( encoding: TransferEncoding ) -> StreamDecoder {
-        let remainder = match &encoding {
-            TransferEncoding::Length( v ) => *v,
-            _ => 1
-        };
-        StreamDecoder {
-            encoding,
-            remainder,
-            chunk: Vec::new()
-        }
-    }
-
-    fn decode( &mut self, out: &mut Vec< u8 >, buf: &[ u8 ], length: usize ) -> Result< usize, Box< dyn Error + Send > > {
-        if length == 0 || self.is_finished() {
-            Ok( 0 )
-        } else {
-            match &self.encoding {
-                TransferEncoding::Identity => {
-                    out.extend_from_slice( &buf[ .. length ] );
-                    Ok( length )
-                }
-                TransferEncoding::Chunked => {
-                    let mut read = 0;
-                    let mut index = 0;
-                    while index < length && self.remainder != 0 {
-                        match self.remainder {
-                            1 => {
-                                // Get the chunk size
-                                self.chunk.push( buf[ index ] );
-                                index += 1;
-                                if self.chunk.windows( 2 ).nth_back( 0 ) == Some( b"\r\n" ) {
-                                    // Ignore chunk extensions
-                                    if let Some( cutoff ) = self.chunk.iter().position( | &x | x == b';' || x == b'\r' ) {
-                                        self.remainder = match std::str::from_utf8( &self.chunk[ .. cutoff ] ) {
-                                            Ok( res ) =>  match usize::from_str_radix( res, 16 ) {
-                                                Ok( hex ) => hex,
-                                                Err( e ) => return Err( Box::new( std::io::Error::new( ErrorKind::InvalidData, format!( "Invalid value provided for chunk size: {}", e ) ) ) )
-                                            }
-                                            Err( e ) => return Err( Box::new( std::io::Error::new( ErrorKind::InvalidData, format!( "Could not parse chunk size: {}", e ) ) ) )
-                                        };
-                                        // Check if it's the last chunk
-                                        // Ignore trailers
-                                        if self.remainder != 0 {
-                                            // +2 for remainder
-                                            // +2 for extra CRLF
-                                            self.remainder += 4;
-                                            self.chunk.clear();
-                                        }
-                                    } else {
-                                        return Err( Box::new( std::io::Error::new( ErrorKind::InvalidData, "Missing CRLF" ) ) )
-                                    }
-                                }
-                            }
-                            2 => {
-                                // No more chunk data should be read
-                                if self.chunk.windows( 2 ).nth_back( 0 ) == Some( b"\r\n" ) {
-                                    // Append current data
-                                    read += self.chunk.len() - 2;
-                                    out.extend_from_slice( &self.chunk[ .. self.chunk.len() - 2 ] );
-                                    // Prepare for reading the next chunk size
-                                    self.remainder = 1;
-                                    self.chunk.clear();
-                                } else {
-                                    return Err( Box::new( std::io::Error::new( ErrorKind::InvalidData, "Missing CRLF from chunk" ) ) )
-                                }
-                            }
-                            v => {
-                                // Get the chunk data
-                                let max_read = std::cmp::min( length - index, v - 2 );
-                                self.chunk.extend_from_slice( &buf[ index .. index + max_read ] );
-                                index += max_read;
-                                self.remainder -= max_read;
-                            }
-                        }
-                    }
-
-                    Ok( read )
-                }
-                TransferEncoding::Length( _ ) => {
-                    let allowed = std::cmp::min( length, self.remainder );
-                    if allowed != 0 {
-                        out.extend_from_slice( &buf[ .. allowed ] );
-                        self.remainder -= allowed;
-                    }
-                    Ok( allowed )
-                }
-            }
-        }
-    }
-
-    fn is_finished( &self ) -> bool {
-        self.encoding != TransferEncoding::Identity && self.remainder == 0
-    }
-}
-
 async fn handle_connection( server: Arc< RwLock< Server > >, mut stream: TcpStream ) -> Result< (), Box< dyn Error > > {
     let ( server_id, header_timeout, http_max_len ) = {
         let properties = &server.read().await.properties;
@@ -491,13 +383,13 @@ async fn handle_connection( server: Arc< RwLock< Server > >, mut stream: TcpStre
                 return response::send_forbidden( &mut stream, &server_id, Some( ( "text/plain; charset=utf-8", "Too many sources connected" ) ) ).await;
             }
 
-            let mut decoder: StreamDecoder;
+            let mut decoder: stream_decoder::StreamDecoder;
 
             if method == "SOURCE" {
                 // Give an 200 OK response
                 response::send_ok( &mut stream, &server_id, None ).await?;
 
-                decoder = StreamDecoder::new( TransferEncoding::Identity );
+                decoder = stream_decoder::StreamDecoder::new( stream_decoder::TransferEncoding::Identity );
             } else {
                 // Verify that the transfer encoding is identity or not included
                 // No support for chunked or encoding ATM
@@ -508,7 +400,7 @@ async fn handle_connection( server: Arc< RwLock< Server > >, mut stream: TcpStre
                         match std::str::from_utf8( value ) {
                             Ok( string ) => {
                                 match string.parse::< usize >() {
-                                    Ok( length ) => decoder = StreamDecoder::new( TransferEncoding::Length( length ) ),
+                                    Ok( length ) => decoder = stream_decoder::StreamDecoder::new( stream_decoder::TransferEncoding::Length( length ) ),
                                     Err( _ ) => return response::send_bad_request( &mut stream, &server_id, Some( ( "text/plain; charset=utf-8", "Invalid Content-Length" ) ) ).await
                                 }
                             }
@@ -517,11 +409,11 @@ async fn handle_connection( server: Arc< RwLock< Server > >, mut stream: TcpStre
                     }
                     ( Some( b"chunked" ), None ) => {
                         // Use chunked decoder
-                        decoder = StreamDecoder::new( TransferEncoding::Chunked );
+                        decoder = stream_decoder::StreamDecoder::new( stream_decoder::TransferEncoding::Chunked );
                     }
                     ( Some( b"identity" ), None ) | ( None, None ) => {
                         // Use identity
-                        decoder = StreamDecoder::new( TransferEncoding::Identity );
+                        decoder = stream_decoder::StreamDecoder::new( stream_decoder::TransferEncoding::Identity );
                     }
                     _ => return response::send_bad_request( &mut stream, &server_id, Some( ( "text/plain; charset=utf-8", "Unsupported transfer encoding" ) ) ).await
                 }
@@ -1468,15 +1360,15 @@ async fn relay_mountpoint( server: Arc< RwLock< Server > >, master_server: Maste
             match std::str::from_utf8( value ) {
                 Ok( string ) => {
                     match string.parse::< usize >() {
-                        Ok( length ) => StreamDecoder::new( TransferEncoding::Length( length ) ),
+                        Ok( length ) => stream_decoder::StreamDecoder::new( stream_decoder::TransferEncoding::Length( length ) ),
                         Err( _ ) => return Err( Box::new( std::io::Error::new( ErrorKind::InvalidData, "Invalid Content-Length" ) ) )
                     }
                 }
                 Err( _ ) => return Err( Box::new( std::io::Error::new( ErrorKind::InvalidData, "Unknown unicode found in Content-Length" ) ) )
             }
         }
-        ( Some( b"chunked" ), None ) => StreamDecoder::new( TransferEncoding::Chunked ),
-        ( Some( b"identity" ), None ) | ( None, None ) => StreamDecoder::new( TransferEncoding::Identity ),
+        ( Some( b"chunked" ), None ) => stream_decoder::StreamDecoder::new( stream_decoder::TransferEncoding::Chunked ),
+        ( Some( b"identity" ), None ) | ( None, None ) => stream_decoder::StreamDecoder::new( stream_decoder::TransferEncoding::Identity ),
         _ => return Err( Box::new( std::io::Error::new( ErrorKind::InvalidData, "Unsupported Transfer-Encoding" ) ) )
     };
 
