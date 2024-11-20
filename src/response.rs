@@ -193,3 +193,36 @@ pub async fn read_http_response( stream: &mut Stream, buffer: &mut Vec< u8 >, ma
         }
     }
 }
+
+pub async fn write_to_client( stream: &mut TcpStream, sent_count: &mut usize, metalen: usize, data: &[ u8 ], metadata: &[ u8 ] ) -> Result< (), std::io::Error > {
+    let new_sent = *sent_count + data.len();
+    // Check if we need to send the metadata
+    if new_sent > metalen {
+        // Create a new vector to hold our data + metadata
+        let mut inserted: Vec< u8 > = Vec::new();
+        // Insert the current range
+        let mut index = metalen - *sent_count;
+        if index > 0 {
+            inserted.extend_from_slice( &data[ .. index ] );
+        }
+        while index < data.len() {
+            inserted.extend_from_slice( metadata );
+
+            // Add the data
+            let end = std::cmp::min( data.len(), index + metalen );
+            if index != end {
+                inserted.extend_from_slice( &data[ index .. end ] );
+                index = end;
+            }
+        }
+
+        // Update the total sent amount and send
+        *sent_count = new_sent % metalen;
+        stream.write_all( &inserted ).await
+    } else {
+        // Copy over the new amount
+        *sent_count = new_sent;
+        stream.write_all( data ).await
+    }
+
+}

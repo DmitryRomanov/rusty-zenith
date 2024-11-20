@@ -1,7 +1,7 @@
 use httpdate::fmt_http_date;
 use httparse::Status;
 use regex::Regex;
-use serde::{ Deserialize, Serialize };
+use serde::Deserialize;
 use serde_json::{ json, Value };
 use std::collections::HashMap;
 use std::error::Error;
@@ -25,191 +25,9 @@ mod icy;
 mod stream_decoder;
 mod source;
 mod client;
+mod server;
 
-// Default constants
-const ADDRESS: &str = "0.0.0.0";
-const PORT: u16 = 8000;
-// The default interval in bytes between icy metadata chunks
-// The metaint cannot be changed per client once the response has been sent
-// https://thecodeartist.blogspot.com/2013/02/shoutcast-internet-radio-protocol.html
-const METAINT: usize = 16_000;
-// Server that gets sent in the header
-const SERVER_ID: &str = "Rusty Zenith 0.1.0";
-// Contact information
-const ADMIN: &str = "admin@localhost";
-// Public facing domain/address
-const HOST: &str = "localhost";
-// Geographic location. Icecast included it in their settings, so why not
-const LOCATION: &str = "1.048596";
-// Description of the internet radio
-const DESCRIPTION: &str = "Yet Another Internet Radio";
-
-// How many regular sources, not including relays
-const SOURCES: usize = 4;
-// How many sources can be connected, in total
-const MAX_SOURCES: usize = 4;
-// How many clients can be connected, in total
-const CLIENTS: usize = 400;
-// How many bytes a client can have queued until they get disconnected
-const QUEUE_SIZE: usize = 102400;
-// How many bytes to send to the client all at once when they first connect
-// Useful for filling up the client buffer quickly, but also introduces some delay
-const BURST_SIZE: usize = 65536;
-// How long in milliseconds a client has to send a complete request
-const HEADER_TIMEOUT: u64 = 15_000;
-// How long in milliseconds a source has to send something before being disconnected
-const SOURCE_TIMEOUT: u64 = 10_000;
-// The maximum size in bytes of an acceptable http message not including the body
-const HTTP_MAX_LENGTH: usize = 8192;
-// The maximum number of redirects allowed, when fetching relays from another server/stream
-const HTTP_MAX_REDIRECTS: usize = 5;
-
-#[ derive( Serialize, Deserialize, Clone ) ]
-struct SourceLimits {
-    #[ serde( default = "default_property_limits_clients" ) ]
-    clients: usize,
-    #[ serde( default = "default_property_limits_burst_size" ) ]
-    burst_size: usize,
-    #[ serde( default = "default_property_limits_source_timeout" ) ]
-    source_timeout: u64
-}
-
-// TODO Add a list of "relay" structs
-// Relay structs should have an auth of their own, if provided
-// Having a master server is not very good
-// It would be much better to add relays through an api or something
-#[ derive( Serialize, Deserialize, Clone ) ]
-struct MasterServer {
-    #[ serde( default = "default_property_master_server_enabled" ) ]
-    enabled: bool,
-    #[ serde( default = "default_property_master_server_url" ) ]
-    url: String,
-    #[ serde( default = "default_property_master_server_update_interval" ) ]
-    update_interval: u64,
-    #[ serde( default = "default_property_master_server_relay_limit" ) ]
-    relay_limit: usize,
-}
-
-// TODO Add permissions, specifically source, admin, bypass client count, etc
-#[ derive( Serialize, Deserialize, Clone ) ]
-struct Credential {
-    username: String,
-    password: String
-}
-
-// Add a total source limit
-#[ derive( Serialize, Deserialize, Clone ) ]
-struct ServerLimits {
-    #[ serde( default = "default_property_limits_clients" ) ]
-    clients: usize,
-    #[ serde( default = "default_property_limits_sources" ) ]
-    sources: usize,
-    #[ serde( default = "default_property_limits_total_sources" ) ]
-    total_sources: usize,
-    #[ serde( default = "default_property_limits_queue_size" ) ]
-    queue_size: usize,
-    #[ serde( default = "default_property_limits_burst_size" ) ]
-    burst_size: usize,
-    #[ serde( default = "default_property_limits_header_timeout" ) ]
-    header_timeout: u64,
-    #[ serde( default = "default_property_limits_source_timeout" ) ]
-    source_timeout: u64,
-    #[ serde( default = "default_property_limits_http_max_length" ) ]
-    http_max_length: usize,
-    #[ serde( default = "default_property_limits_http_max_redirects" ) ]
-    http_max_redirects: usize,
-    #[ serde( default = "default_property_limits_source_limits" ) ]
-    source_limits: HashMap< String, SourceLimits >
-}
-
-#[ derive( Serialize, Deserialize, Clone ) ]
-struct ServerProperties {
-    // Ideally, there would be multiple addresses and ports and TLS support
-    #[ serde( default = "default_property_address" ) ]
-    address: String,
-    #[ serde( default = "default_property_port" ) ]
-    port: u16,
-    #[ serde( default = "default_property_metaint" ) ]
-    metaint: usize,
-    #[ serde( default = "default_property_server_id" ) ]
-    server_id: String,
-    #[ serde( default = "default_property_admin" ) ]
-    admin: String,
-    #[ serde( default = "default_property_host" ) ]
-    host: String,
-    #[ serde( default = "default_property_location" ) ]
-    location: String,
-    #[ serde( default = "default_property_description" ) ]
-    description: String,
-    #[ serde( default = "default_property_limits" ) ]
-    limits: ServerLimits,
-    #[ serde( default = "default_property_users" ) ]
-    users: Vec< Credential >,
-    #[ serde( default = "default_property_master_server" ) ]
-    master_server: MasterServer
-}
-
-impl ServerProperties {
-    fn new() -> ServerProperties {
-        ServerProperties {
-            address: default_property_address(),
-            port: default_property_port(),
-            metaint: default_property_metaint(),
-            server_id: default_property_server_id(),
-            admin: default_property_admin(),
-            host: default_property_host(),
-            location: default_property_location(),
-            description: default_property_description(),
-            limits: default_property_limits(),
-            users: default_property_users(),
-            master_server: default_property_master_server()
-        }
-    }
-}
-
-#[ derive( Serialize, Deserialize, Clone ) ]
-struct ServerStats {
-    start_time: u64,
-    peak_listeners: usize,
-    session_bytes_sent: usize,
-    session_bytes_read: usize,
-}
-
-impl ServerStats {
-    fn new() -> ServerStats {
-        ServerStats {
-            start_time: 0,
-            peak_listeners: 0,
-            session_bytes_sent: 0,
-            session_bytes_read: 0
-        }
-    }
-}
-
-struct Server {
-    sources: HashMap< String, Arc< RwLock< source::Source > > >,
-    clients: HashMap< Uuid, client::Properties >,
-    // TODO Find a better place to put these, for constant time fetching
-    source_count: usize,
-    relay_count: usize,
-    properties: ServerProperties,
-    stats: ServerStats
-}
-
-impl Server {
-    fn new( properties: ServerProperties ) -> Server {
-        Server{
-            sources: HashMap::new(),
-            clients: HashMap::new(),
-            source_count: 0,
-            relay_count: 0,
-            properties,
-            stats: ServerStats::new()
-        }
-    }
-}
-
-async fn handle_connection( server: Arc< RwLock< Server > >, mut stream: TcpStream ) -> Result< (), Box< dyn Error > > {
+async fn handle_connection( server: Arc< RwLock< server::Server > >, mut stream: TcpStream ) -> Result< (), Box< dyn Error > > {
     let ( server_id, header_timeout, http_max_len ) = {
         let properties = &server.read().await.properties;
         ( properties.server_id.clone(), properties.limits.header_timeout, properties.limits.http_max_length )
@@ -601,7 +419,7 @@ async fn handle_connection( server: Arc< RwLock< Server > >, mut stream: TcpStre
                     if !burst_buf.is_empty() {
                         match {
                             if meta_enabled {
-                                write_to_client( &mut stream, &mut sent_count, metalen, &burst_buf, &metadata_copy ).await
+                                response::write_to_client( &mut stream, &mut sent_count, metalen, &burst_buf, &metadata_copy ).await
                             } else {
                                 stream.write_all( &burst_buf ).await
                             }
@@ -643,7 +461,7 @@ async fn handle_connection( server: Arc< RwLock< Server > >, mut stream: TcpStre
                                             }
                                         };
 
-                                        write_to_client( &mut stream, &mut sent_count, metalen, &read.to_vec(), &meta_vec ).await
+                                        response::write_to_client( &mut stream, &mut sent_count, metalen, &read.to_vec(), &meta_vec ).await
                                     } else {
                                         stream.write_all( &read.to_vec() ).await
                                     }
@@ -1190,7 +1008,7 @@ async fn connect_and_redirect( url: String, headers: Vec< String >, max_len: usi
     }
 }
 
-async fn master_server_mountpoints( server: &Arc< RwLock< Server > >, master_info: &MasterServer ) -> Result< Vec<String>, Box< dyn Error > > {
+async fn master_server_mountpoints( server: &Arc< RwLock< server::Server > >, master_info: &server::Master ) -> Result< Vec<String>, Box< dyn Error > > {
     // Get all master mountpoints
     let ( server_id, header_timeout, http_max_len, http_max_redirects ) = {
         let properties = &server.read().await.properties;
@@ -1256,7 +1074,7 @@ async fn master_server_mountpoints( server: &Arc< RwLock< Server > >, master_inf
 
 #[ allow( clippy::map_entry ) ]
 #[ allow( clippy::blocks_in_if_conditions ) ]
-async fn relay_mountpoint( server: Arc< RwLock< Server > >, master_server: MasterServer, mount: String ) -> Result< (), Box< dyn Error > > {
+async fn relay_mountpoint( server: Arc< RwLock< server::Server > >, master_server: server::Master, mount: String ) -> Result< (), Box< dyn Error > > {
     let ( server_id, header_timeout, http_max_len, http_max_redirects ) = {
         let properties = &server.read().await.properties;
         ( properties.server_id.clone(), properties.limits.header_timeout, properties.limits.http_max_length, properties.limits.http_max_redirects )
@@ -1658,7 +1476,7 @@ async fn relay_mountpoint( server: Arc< RwLock< Server > >, master_server: Maste
     }
 }
 
-async fn slave_node( server: Arc< RwLock< Server > >, master_server: MasterServer ) {
+async fn slave_node( server: Arc< RwLock< server::Server > >, master_server: server::Master ) {
     /*
         Master-slave polling
         We will retrieve mountpoints from master node every update_interval and mount them in slave node.
@@ -1761,38 +1579,6 @@ async fn broadcast_to_clients( source: &Arc< RwLock< source::Source > >, data: V
     }
 }
 
-async fn write_to_client( stream: &mut TcpStream, sent_count: &mut usize, metalen: usize, data: &[ u8 ], metadata: &[ u8 ] ) -> Result< (), std::io::Error > {
-    let new_sent = *sent_count + data.len();
-    // Check if we need to send the metadata
-    if new_sent > metalen {
-        // Create a new vector to hold our data + metadata
-        let mut inserted: Vec< u8 > = Vec::new();
-        // Insert the current range
-        let mut index = metalen - *sent_count;
-        if index > 0 {
-            inserted.extend_from_slice( &data[ .. index ] );
-        }
-        while index < data.len() {
-            inserted.extend_from_slice( metadata );
-
-            // Add the data
-            let end = std::cmp::min( data.len(), index + metalen );
-            if index != end {
-                inserted.extend_from_slice( &data[ index .. end ] );
-                index = end;
-            }
-        }
-
-        // Update the total sent amount and send
-        *sent_count = new_sent % metalen;
-        stream.write_all( &inserted ).await
-    } else {
-        // Copy over the new amount
-        *sent_count = new_sent;
-        stream.write_all( data ).await
-    }
-
-}
 
 /**
  * Get a vector containing n and the padded data
@@ -1851,9 +1637,8 @@ fn get_basic_auth( headers: &[ httparse::Header ] ) -> Option< ( String, String 
 }
 
 
-
 // TODO Add some sort of permission system
-fn validate_user( properties: &ServerProperties, username: String, password: String ) -> bool {
+fn validate_user( properties: &server::Properties, username: String, password: String ) -> bool {
     for cred in &properties.users {
         if cred.username == username && cred.password == password {
             return true;
@@ -1863,61 +1648,11 @@ fn validate_user( properties: &ServerProperties, username: String, password: Str
 }
 
 // Serde default deserialization values
-fn default_property_address() -> String { ADDRESS.to_string() }
-fn default_property_port() -> u16 { PORT }
-fn default_property_metaint() -> usize { METAINT }
-fn default_property_server_id() -> String { SERVER_ID.to_string() }
-fn default_property_admin() -> String { ADMIN.to_string() }
-fn default_property_host() -> String { HOST.to_string() }
-fn default_property_location() -> String { LOCATION.to_string() }
-fn default_property_description() -> String { DESCRIPTION.to_string() }
-fn default_property_users() -> Vec< Credential > { vec![ Credential{ username: "admin".to_string(), password: "hackme".to_string() }, Credential { username: "source".to_string(), password: "hackme".to_string() } ] }
-fn default_property_limits() -> ServerLimits { ServerLimits {
-    clients: default_property_limits_clients(),
-    sources: default_property_limits_sources(),
-    total_sources: default_property_limits_total_sources(),
-    queue_size: default_property_limits_queue_size(),
-    burst_size: default_property_limits_burst_size(),
-    header_timeout: default_property_limits_header_timeout(),
-    source_timeout: default_property_limits_source_timeout(),
-    source_limits: default_property_limits_source_limits(),
-    http_max_length: default_property_limits_http_max_length(),
-    http_max_redirects: default_property_limits_http_max_redirects()
-} }
-fn default_property_limits_clients() -> usize { CLIENTS }
-fn default_property_limits_sources() -> usize { SOURCES }
-fn default_property_limits_total_sources() -> usize { MAX_SOURCES }
-fn default_property_limits_queue_size() -> usize { QUEUE_SIZE }
-fn default_property_limits_burst_size() -> usize { BURST_SIZE }
-fn default_property_limits_header_timeout() -> u64 { HEADER_TIMEOUT }
-fn default_property_limits_source_timeout() -> u64 { SOURCE_TIMEOUT }
-fn default_property_limits_http_max_length() -> usize { HTTP_MAX_LENGTH }
-fn default_property_limits_http_max_redirects() -> usize { HTTP_MAX_REDIRECTS }
-fn default_property_limits_source_mountpoint() -> String { "/radio".to_string() }
-fn default_property_limits_source_limits() -> HashMap< String, SourceLimits > {
-    let mut map = HashMap::new();
-    map.insert( default_property_limits_source_mountpoint(), SourceLimits {
-        clients: default_property_limits_clients(),
-        burst_size: default_property_limits_burst_size(),
-        source_timeout: default_property_limits_source_timeout()
-    } );
-    map
-}
-fn default_property_master_server() -> MasterServer { MasterServer {
-    enabled: default_property_master_server_enabled(),
-    url: default_property_master_server_url(),
-    update_interval: default_property_master_server_update_interval(),
-    relay_limit: default_property_master_server_relay_limit()
-} }
-fn default_property_master_server_enabled() -> bool { false }
-fn default_property_master_server_url() -> String { format!( "http://localhost:{}", default_property_port() + 1 ) }
-fn default_property_master_server_update_interval() -> u64 { 120 }
-fn default_property_master_server_relay_limit() -> usize { SOURCES }
 
 #[ tokio::main ]
 async fn main() {
     // TODO Log everything somehow or something
-    let mut properties = ServerProperties::new();
+    let mut properties = server::Properties::new();
 
     let args: Vec< String > = std::env::args().collect();
     let config_location = {
@@ -2008,7 +1743,7 @@ async fn main() {
                 println!( "Attempting to bind to {}:{}", properties.address, properties.port );
                 match TcpListener::bind( address ).await {
                     Ok( listener ) => {
-                        let server = Arc::new( RwLock::new( Server::new( properties ) ) );
+                        let server = Arc::new( RwLock::new( server::Server::new( properties ) ) );
 
                         if let Ok( time ) = SystemTime::now().duration_since( UNIX_EPOCH ) {
                             println!( "The server has started on {}", fmt_http_date( SystemTime::now() ) );

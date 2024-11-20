@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 use crate::client;
 use crate::icy;
+use crate::server;
 
 // TODO Add something determining if a source is a relay, or any other kind of source, for that matter
 // TODO Implement hidden sources
@@ -55,4 +56,14 @@ pub struct Stats {
     pub start_time: u64,
     pub bytes_read: usize,
     pub peak_listeners: usize,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Limits {
+    #[serde(default = "server::default_property_limits_clients")]
+    pub clients: usize,
+    #[serde(default = "server::default_property_limits_burst_size")]
+    pub burst_size: usize,
+    #[serde(default = "server::default_property_limits_source_timeout")]
+    pub source_timeout: u64,
 }
