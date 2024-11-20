@@ -66,7 +66,7 @@ async fn handle_connection( server: Arc< RwLock< server::Server > >, mut stream:
         "SOURCE" | "PUT" => {
             // Check for authorization
             if let Some( ( name, pass ) ) = request::get_basic_auth( headers ) {
-                if !validate_user( &server.read().await.properties, name, pass ) {
+                if !server::validate_user( &server.read().await.properties, name, pass ) {
                     // Invalid user/pass provided
                     return response::send_unauthorized( &mut stream, &server_id, Some( ( "text/plain; charset=urf-8", "Invalid credentials" ) ) ).await;
                 }
@@ -513,7 +513,7 @@ async fn handle_connection( server: Arc< RwLock< server::Server > >, mut stream:
                         if let Some( ( name, pass ) ) = request::get_basic_auth( headers ) {
                             // For testing purposes right now
                             // TODO Add proper configuration
-                            if !validate_user( &serv.properties, name, pass ) {
+                            if !server::validate_user( &serv.properties, name, pass ) {
                                 return response::send_unauthorized( &mut stream, &server_id, Some( ( "text/plain; charset=utf-8", "Invalid credentials" ) ) ).await;
                             }
                         } else {
@@ -538,7 +538,7 @@ async fn handle_connection( server: Arc< RwLock< server::Server > >, mut stream:
                                                     url: url.clone()
                                                 } ),
                                             };
-                                            source.metadata_vec = get_metadata_vec( &source.metadata );
+                                            source.metadata_vec = icy::get_metadata_vec( &source.metadata );
                                             response::send_ok( &mut stream, &server_id, Some( ( "text/plain; charset=utf-8", "Success" ) ) ).await?;
                                         }
                                         None => response::send_forbidden( &mut stream, &server_id, Some( ( "text/plain; charset=utf-8", "Invalid mount" ) ) ).await?,
@@ -557,7 +557,7 @@ async fn handle_connection( server: Arc< RwLock< server::Server > >, mut stream:
                         if let Some( ( name, pass ) ) = request::get_basic_auth( headers ) {
                             // For testing purposes right now
                             // TODO Add proper configuration
-                            if !validate_user( &serv.properties, name, pass ) {
+                            if !server::validate_user( &serv.properties, name, pass ) {
                                 return response::send_unauthorized( &mut stream, &server_id, Some( ( "text/plain; charset=utf-8", "Invalid credentials" ) ) ).await;
                             }
                         } else {
@@ -606,7 +606,7 @@ async fn handle_connection( server: Arc< RwLock< server::Server > >, mut stream:
                         if let Some( ( name, pass ) ) = request::get_basic_auth( headers ) {
                             // For testing purposes right now
                             // TODO Add proper configuration
-                            if !validate_user( &serv.properties, name, pass ) {
+                            if !server::validate_user( &serv.properties, name, pass ) {
                                 return response::send_unauthorized( &mut stream, &server_id, Some( ( "text/plain; charset=utf-8", "Invalid credentials" ) ) ).await;
                             }
                         } else {
@@ -643,7 +643,7 @@ async fn handle_connection( server: Arc< RwLock< server::Server > >, mut stream:
                         if let Some( ( name, pass ) ) = request::get_basic_auth( headers ) {
                             // For testing purposes right now
                             // TODO Add proper configuration
-                            if !validate_user( &serv.properties, name, pass ) {
+                            if !server::validate_user( &serv.properties, name, pass ) {
                                 return response::send_unauthorized( &mut stream, &server_id, Some( ( "text/plain; charset=utf-8", "Invalid credentials" ) ) ).await;
                             }
                         } else {
@@ -683,7 +683,7 @@ async fn handle_connection( server: Arc< RwLock< server::Server > >, mut stream:
                         if let Some( ( name, pass ) ) = request::get_basic_auth( headers ) {
                             // For testing purposes right now
                             // TODO Add proper configuration
-                            if !validate_user( &serv.properties, name, pass ) {
+                            if !server::validate_user( &serv.properties, name, pass ) {
                                 return response::send_unauthorized( &mut stream, &server_id, Some( ( "text/plain; charset=utf-8", "Invalid credentials" ) ) ).await;
                             }
                         } else {
@@ -721,7 +721,7 @@ async fn handle_connection( server: Arc< RwLock< server::Server > >, mut stream:
                         if let Some( ( name, pass ) ) = request::get_basic_auth( headers ) {
                             // For testing purposes right now
                             // TODO Add proper configuration
-                            if !validate_user( &serv.properties, name, pass ) {
+                            if !server::validate_user( &serv.properties, name, pass ) {
                                 return response::send_unauthorized( &mut stream, &server_id, Some( ( "text/plain; charset=utf-8", "Invalid credentials" ) ) ).await;
                             }
                         } else {
@@ -754,7 +754,7 @@ async fn handle_connection( server: Arc< RwLock< server::Server > >, mut stream:
                         if let Some( ( name, pass ) ) = request::get_basic_auth( headers ) {
                             // For testing purposes right now
                             // TODO Add proper configuration
-                            if !validate_user( &serv.properties, name, pass ) {
+                            if !server::validate_user( &serv.properties, name, pass ) {
                                 return response::send_unauthorized( &mut stream, &server_id, Some( ( "text/plain; charset=utf-8", "Invalid credentials" ) ) ).await;
                             }
                         } else {
@@ -1577,51 +1577,6 @@ async fn broadcast_to_clients( source: &Arc< RwLock< source::Source > >, data: V
             drop( client.read().await.sender.write().await.send( Arc::new( Vec::new() ) ) );
         }
     }
-}
-
-
-/**
- * Get a vector containing n and the padded data
- */
-fn get_metadata_vec( metadata: &Option< icy::Metadata > ) -> Vec< u8 > {
-    let mut subvec = vec![ 0 ];
-    if let Some( icy_metadata ) = metadata {
-        subvec.extend_from_slice( b"StreamTitle='" );
-        if let Some( title ) = &icy_metadata.title {
-            subvec.extend_from_slice( title.as_bytes() );
-        }
-        subvec.extend_from_slice( b"';StreamUrl='" );
-        if let Some( url ) = &icy_metadata.url {
-            subvec.extend_from_slice( url.as_bytes() );
-        }
-        subvec.extend_from_slice( b"';" );
-
-        // Calculate n
-        let len = subvec.len() - 1;
-        subvec[ 0 ] = {
-            let down = len >> 4;
-            let remainder = len & 0b1111;
-            if remainder > 0 {
-                // Pad with zeroes
-                subvec.append( &mut vec![ 0; 16 - remainder ] );
-                down + 1
-            } else {
-                down
-            }
-        } as u8;
-    }
-
-    subvec
-}
-
-// TODO Add some sort of permission system
-fn validate_user( properties: &server::Properties, username: String, password: String ) -> bool {
-    for cred in &properties.users {
-        if cred.username == username && cred.password == password {
-            return true;
-        }
-    }
-    false
 }
 
 // Serde default deserialization values

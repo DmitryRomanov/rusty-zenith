@@ -292,3 +292,13 @@ fn default_property_master_server_update_interval() -> u64 {
 fn default_property_master_server_relay_limit() -> usize {
     SOURCES
 }
+
+// TODO Add some sort of permission system
+pub fn validate_user(properties: &Properties, username: String, password: String) -> bool {
+    for cred in &properties.users {
+        if cred.username == username && cred.password == password {
+            return true;
+        }
+    }
+    false
+}

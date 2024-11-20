@@ -61,3 +61,37 @@ pub fn populate_properties(properties: &mut Properties, headers: &[httparse::Hea
         }
     }
 }
+
+/**
+ * Get a vector containing n and the padded data
+ */
+pub fn get_metadata_vec(metadata: &Option<Metadata>) -> Vec<u8> {
+    let mut subvec = vec![0];
+    if let Some(icy_metadata) = metadata {
+        subvec.extend_from_slice(b"StreamTitle='");
+        if let Some(title) = &icy_metadata.title {
+            subvec.extend_from_slice(title.as_bytes());
+        }
+        subvec.extend_from_slice(b"';StreamUrl='");
+        if let Some(url) = &icy_metadata.url {
+            subvec.extend_from_slice(url.as_bytes());
+        }
+        subvec.extend_from_slice(b"';");
+
+        // Calculate n
+        let len = subvec.len() - 1;
+        subvec[0] = {
+            let down = len >> 4;
+            let remainder = len & 0b1111;
+            if remainder > 0 {
+                // Pad with zeroes
+                subvec.append(&mut vec![0; 16 - remainder]);
+                down + 1
+            } else {
+                down
+            }
+        } as u8;
+    }
+
+    subvec
+}
