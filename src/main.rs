@@ -14,7 +14,7 @@ use std::time::{ Duration, SystemTime, UNIX_EPOCH };
 use tokio::io::{ AsyncReadExt, AsyncWriteExt };
 use tokio::net::{ TcpListener, TcpStream };
 use tokio::sync::RwLock;
-use tokio::sync::mpsc::{ UnboundedSender, UnboundedReceiver, unbounded_channel };
+use tokio::sync::mpsc::unbounded_channel;
 use tokio::time::timeout;
 use tokio_native_tls::native_tls::TlsConnector;
 use url::Url;
@@ -23,6 +23,8 @@ mod request;
 mod response;
 mod icy;
 mod stream_decoder;
+mod source;
+mod client;
 
 // Default constants
 const ADDRESS: &str = "0.0.0.0";
@@ -62,28 +64,6 @@ const HTTP_MAX_LENGTH: usize = 8192;
 // The maximum number of redirects allowed, when fetching relays from another server/stream
 const HTTP_MAX_REDIRECTS: usize = 5;
 
-struct Client {
-    source: RwLock< String >,
-    sender: RwLock< UnboundedSender< Arc< Vec< u8 > > > >,
-    receiver: RwLock< UnboundedReceiver< Arc< Vec< u8 > > > >,
-    buffer_size: RwLock< usize >,
-    properties: ClientProperties,
-    stats: RwLock< ClientStats >
-}
-
-#[ derive( Serialize, Clone ) ]
-struct ClientProperties {
-    id: Uuid,
-    uagent: Option< String >,
-    metadata: bool
-}
-
-#[ derive( Serialize, Clone ) ]
-struct ClientStats {
-    start_time: u64,
-    bytes_sent: usize
-}
-
 #[ derive( Serialize, Deserialize, Clone ) ]
 struct SourceLimits {
     #[ serde( default = "default_property_limits_clients" ) ]
@@ -92,55 +72,6 @@ struct SourceLimits {
     burst_size: usize,
     #[ serde( default = "default_property_limits_source_timeout" ) ]
     source_timeout: u64
-}
-
-// TODO Add something determining if a source is a relay, or any other kind of source, for that matter
-// TODO Implement hidden sources
-struct Source {
-    // Is setting the mountpoint in the source really useful, since it's not like the source has any use for it
-    mountpoint: String,
-    properties: icy::Properties,
-    metadata: Option< icy::Metadata >,
-    metadata_vec: Vec< u8 >,
-    clients: HashMap< Uuid, Arc< RwLock< Client > > >,
-    burst_buffer: Vec< u8 >,
-    stats: RwLock< SourceStats >,
-    fallback: Option< String >,
-    // Not really sure how else to signal when to disconnect the source
-    disconnect_flag: bool
-}
-
-impl Source {
-    fn new( mountpoint: String, properties: icy::Properties ) -> Source {
-        Source {
-            mountpoint,
-            properties,
-            metadata: None,
-            metadata_vec: vec![ 0 ],
-            clients: HashMap::new(),
-            burst_buffer: Vec::new(),
-            stats: RwLock::new( SourceStats {
-                start_time: {
-                    if let Ok( time ) = SystemTime::now().duration_since( UNIX_EPOCH ) {
-                        time.as_secs()
-                    } else {
-                        0
-                    }
-                },
-                bytes_read: 0,
-                peak_listeners: 0
-            } ),
-            fallback: None,
-            disconnect_flag: false
-        }
-    }
-}
-
-#[ derive( Serialize, Deserialize, Clone ) ]
-struct SourceStats {
-    start_time: u64,
-    bytes_read: usize,
-    peak_listeners: usize
 }
 
 // TODO Add a list of "relay" structs
@@ -256,8 +187,8 @@ impl ServerStats {
 }
 
 struct Server {
-    sources: HashMap< String, Arc< RwLock< Source > > >,
-    clients: HashMap< Uuid, ClientProperties >,
+    sources: HashMap< String, Arc< RwLock< source::Source > > >,
+    clients: HashMap< Uuid, client::Properties >,
     // TODO Find a better place to put these, for constant time fetching
     source_count: usize,
     relay_count: usize,
@@ -430,7 +361,7 @@ async fn handle_connection( server: Arc< RwLock< Server > >, mut stream: TcpStre
             // Parse the headers for the source properties
             populate_properties( &mut properties, headers );
 
-            let source = Source::new( path.clone(), properties );
+            let source = source::Source::new( path.clone(), properties );
 
             let queue_size = serv.properties.limits.queue_size;
             let ( burst_size, source_timeout ) =  {
@@ -591,7 +522,7 @@ async fn handle_connection( server: Arc< RwLock< Server > >, mut stream: TcpStre
                 };
 
                 let ( sender, receiver ) = unbounded_channel::< Arc< Vec< u8 > > >();
-                let properties = ClientProperties {
+                let properties = client::Properties {
                     id: client_id,
                     uagent: {
                         if let Some( arr ) = get_header( "User-Agent", headers ) {
@@ -606,7 +537,7 @@ async fn handle_connection( server: Arc< RwLock< Server > >, mut stream: TcpStre
                     },
                     metadata: meta_enabled
                 };
-                let stats = ClientStats {
+                let stats = client::Stats {
                     start_time: {
                         if let Ok( time ) = SystemTime::now().duration_since( UNIX_EPOCH ) {
                             time.as_secs()
@@ -616,7 +547,7 @@ async fn handle_connection( server: Arc< RwLock< Server > >, mut stream: TcpStre
                     },
                     bytes_sent: 0
                 };
-                let client = Client {
+                let client = client::Client {
                     source: RwLock::new( source_id ),
                     sender: RwLock::new( sender ),
                     receiver: RwLock::new( receiver ),
@@ -1382,7 +1313,7 @@ async fn relay_mountpoint( server: Arc< RwLock< Server > >, master_server: Maste
     populate_properties( &mut properties, res.headers );
     properties.uagent = Some( server_id );
 
-    let source = Source::new( mount.to_string(), properties );
+    let source = source::Source::new( mount.to_string(), properties );
 
     // TODO This code is almost an exact replica of the one used for regular source handling, although with a few differences
     let mut serv = server.write().await;
@@ -1790,7 +1721,7 @@ async fn slave_node( server: Arc< RwLock< Server > >, master_server: MasterServe
     }
 }
 
-async fn broadcast_to_clients( source: &Arc< RwLock< Source > >, data: Vec< u8 >, queue_size: usize, burst_size: usize ) {
+async fn broadcast_to_clients( source: &Arc< RwLock< source::Source > >, data: Vec< u8 >, queue_size: usize, burst_size: usize ) {
     // Remove these later
     let mut dropped: Vec< Uuid > = Vec::new();
 
